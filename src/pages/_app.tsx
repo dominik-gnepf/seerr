@@ -16,6 +16,7 @@ import { polyfillIntl } from '@app/utils/polyfillIntl';
 import { MediaServerType } from '@server/constants/server';
 import type { PublicSettingsResponse } from '@server/interfaces/api/settingsInterfaces';
 import type { AvailableLocale } from '@server/types/languages';
+import { getServerBaseUrl } from '@app/utils/serverUrl';
 import axios from 'axios';
 import type { AppInitialProps, AppProps } from 'next/app';
 import App from 'next/app';
@@ -252,57 +253,62 @@ CoreApp.getInitialProps = async (initialProps) => {
   };
 
   if (ctx.res) {
-    // Check if app is initialized and redirect if necessary
-    const response = await axios.get<PublicSettingsResponse>(
-      `http://${process.env.HOST || 'localhost'}:${
-        process.env.PORT || 5055
-      }/api/v1/settings/public`
-    );
+    const baseUrl = getServerBaseUrl();
 
-    currentSettings = response.data;
+    try {
+      // Check if app is initialized and redirect if necessary
+      const response = await axios.get<PublicSettingsResponse>(
+        `${baseUrl}/api/v1/settings/public`
+      );
 
-    const initialized = response.data.initialized;
+      currentSettings = response.data;
 
-    if (!initialized) {
-      if (!router.pathname.match(/(setup|login\/plex)/)) {
-        ctx.res.writeHead(307, {
-          Location: '/setup',
-        });
-        ctx.res.end();
-      }
-    } else {
-      try {
-        // Attempt to get the user by running a request to the local api
-        const response = await axios.get<User>(
-          `http://${process.env.HOST || 'localhost'}:${
-            process.env.PORT || 5055
-          }/api/v1/auth/me`,
-          {
-            headers:
-              ctx.req && ctx.req.headers.cookie
-                ? { cookie: ctx.req.headers.cookie }
-                : undefined,
+      const initialized = response.data.initialized;
+
+      if (!initialized) {
+        if (!router.pathname.match(/(setup|login\/plex)/)) {
+          ctx.res.writeHead(307, {
+            Location: '/setup',
+          });
+          ctx.res.end();
+        }
+      } else {
+        try {
+          // Attempt to get the user by running a request to the local api
+          const response = await axios.get<User>(
+            `${baseUrl}/api/v1/auth/me`,
+            {
+              headers:
+                ctx.req && ctx.req.headers.cookie
+                  ? { cookie: ctx.req.headers.cookie }
+                  : undefined,
+            }
+          );
+          user = response.data;
+
+          if (router.pathname.match(/(setup|login)/)) {
+            ctx.res.writeHead(307, {
+              Location: '/',
+            });
+            ctx.res.end();
           }
-        );
-        user = response.data;
-
-        if (router.pathname.match(/(setup|login)/)) {
-          ctx.res.writeHead(307, {
-            Location: '/',
-          });
-          ctx.res.end();
-        }
-      } catch (e) {
-        // If there is no user, and ctx.res is set (to check if we are on the server side)
-        // _AND_ we are not already on the login or setup route, redirect to /login with a 307
-        // before anything actually renders
-        if (!router.pathname.match(/(login|setup|resetpassword)/)) {
-          ctx.res.writeHead(307, {
-            Location: '/login',
-          });
-          ctx.res.end();
+        } catch (e) {
+          // If there is no user, and ctx.res is set (to check if we are on the server side)
+          // _AND_ we are not already on the login or setup route, redirect to /login with a 307
+          // before anything actually renders
+          if (!router.pathname.match(/(login|setup|resetpassword)/)) {
+            ctx.res.writeHead(307, {
+              Location: '/login',
+            });
+            ctx.res.end();
+          }
         }
       }
+    } catch (e) {
+      // If the backend is unreachable (e.g. Vercel deployment without a
+      // co-located server), fall through with default settings so the
+      // client-side app can still render and attempt API calls via the
+      // browser.
     }
   }
 
